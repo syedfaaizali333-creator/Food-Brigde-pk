@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Explore sample community food listings in Karachi on FoodBridge PK.">
+  <title>Explore food — FoodBridge PK</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"><link href="assets/css/style.css" rel="stylesheet">
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><nav class="navbar navbar-expand-lg" aria-label="Main navigation"><div class="container">
+  <a class="brand-lockup" href="index.html" aria-label="FoodBridge PK home"><span class="brand-mark" aria-hidden="true">F<span>+</span></span><span><span class="brand-name">FoodBridge</span><span class="brand-caption">Pakistan · Share more</span></span></a>
+  <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#main-nav" aria-controls="main-nav" aria-expanded="false" aria-label="Toggle navigation"><span class="navbar-toggler-icon"></span></button>
+  <div class="collapse navbar-collapse" id="main-nav"><div class="navbar-nav mx-lg-auto"><a class="nav-link" href="index.html">Home</a><a class="nav-link" href="explore.html">Explore food</a><a class="nav-link" href="add-food.html">Donate food</a><a class="nav-link" href="marketplace.html">Marketplace</a><a class="nav-link" href="impact.html">Our impact</a></div><div class="d-flex flex-column flex-lg-row gap-2 align-items-stretch align-items-lg-center"><a class="btn btn-link text-decoration-none text-dark fw-semibold" href="login.html">Log in</a><a class="btn btn-outline-brand btn-sm" href="cart.html">Cart</a><a class="btn btn-brand btn-sm" href="register.html">Join the community</a></div></div>
+</div></nav></header>
+<main id="main-content">
+  <section class="page-hero"><div class="container"><nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="index.html">Home</a></li><li class="breadcrumb-item active" aria-current="page">Explore food</li></ol></nav><span class="eyebrow">Good food, close by</span><h1 class="display-title">Find something <em>to share.</em></h1><p class="lead-copy">Browse sample donations from community kitchens, local growers and neighbors around Karachi.</p></div></section>
+  <section class="section-space"><div class="container">
+    <div class="row align-items-end g-3 mb-4"><div class="col-lg-6"><label class="form-label" for="food-search">Search listings</label><input class="form-control" type="search" id="food-search" placeholder="Try “biryani” or “bread”" autocomplete="off"></div><div class="col-sm-6 col-lg-3"><label class="form-label" for="food-category">Food category</label><select class="form-select" id="food-category"><option value="all">All categories</option><option>Prepared meals</option><option>Fresh produce</option><option>Bakery</option></select></div><div class="col-sm-6 col-lg-3"><div class="callout py-2"><strong>6 sample listings</strong><p>Karachi community demo</p></div></div></div>
+    <div class="row g-3 g-lg-4" id="food-grid" aria-live="polite"></div>
+    <div class="callout mt-4 d-none" id="food-empty"><strong>No matching food found.</strong><p>Try another name or choose a different category.</p></div>
+    <div class="callout callout-warning mt-5"><strong>Please check before pickup.</strong><p>Listings are user-provided sample information and do not guarantee food safety. Confirm freshness, allergens, storage and collection arrangements with the donor.</p></div>
+  </div></section>
+</main>
+<footer class="site-footer"><div class="container"><div class="row g-4"><div class="col-lg-4 footer-brand"><a class="brand-lockup" href="index.html"><span class="brand-mark">F<span>+</span></span><span><span class="brand-name">FoodBridge</span><span class="brand-caption">Pakistan · Share more</span></span></a><p class="mt-3 mb-0 footer-note">A community-first food-sharing project for Karachi.</p></div><div class="col-6 col-lg-2"><h2 class="footer-title">Discover</h2><ul class="footer-links"><li><a href="explore.html">Explore food</a></li><li><a href="marketplace.html">Marketplace</a></li><li><a href="impact.html">Impact & safety</a></li><li><a href="my-requests.html">My requests</a></li></ul></div><div class="col-6 col-lg-3"><h2 class="footer-title">Dashboards</h2><ul class="footer-links"><li><a href="donor-dashboard.html">Donor dashboard</a></li><li><a href="receiver-dashboard.html">Receiver dashboard</a></li><li><a href="admin-dashboard.html">Admin demo</a></li><li><a href="add-food.html">Add food</a></li></ul></div><div class="col-lg-3"><h2 class="footer-title">Food safety</h2><p class="small mb-0">Always verify food condition and pickup details with the donor.</p></div></div><div class="footer-bottom"><span>© <span id="current-year"></span> FoodBridge PK</span><span>Sample data · Nothing is permanently saved.</span></div></div></footer>
+<div class="site-toast" id="site-toast" role="status" aria-live="polite"></div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script><script src="assets/js/data.js"></script><script src="assets/js/app.js"></script><script src="assets/js/explore.js"></script>
+</body></html>
