@@ -15,14 +15,30 @@ const adminMessage = document.getElementById('admin-message');
 const loginForm = document.getElementById('admin-login-form');
 const google = document.getElementById('admin-google');
 let unsubscribers = [];
+let accessUnsubscribe = null;
 let authVersion = 0;
 let currentAdmin = null;
 let profiles = [];
 let centers = [];
 
 function stopListeners() { unsubscribers.forEach((unsubscribe) => unsubscribe()); unsubscribers = []; }
-function showLogin({ noAccess = false } = {}) {
+function clearAdminSession() {
+  stopListeners();
+  currentAdmin = null; profiles = []; centers = [];
+  document.getElementById('admin-applications').innerHTML = '<div class="empty-state">Loading applications…</div>';
+  document.getElementById('admin-centers').innerHTML = '<div class="empty-state">Loading locations…</div>';
+  ['admin-pending', 'admin-approved', 'admin-locations'].forEach((id) => { document.getElementById(id).textContent = '—'; });
+  document.getElementById('center-form').reset();
+  document.getElementById('center-id').value = '';
+  document.getElementById('center-active').checked = true;
+  document.getElementById('center-form-title').textContent = 'Add a location';
+  setMessage(adminMessage, '');
+  setMessage(document.getElementById('center-message'), '');
+}
+const deniedMessage = denied.textContent;
+function showLogin({ noAccess = false, reason = deniedMessage } = {}) {
   loading.hidden = true; content.hidden = true; loginPanel.hidden = false;
+  denied.textContent = reason;
   denied.hidden = !noAccess; loginControls.hidden = noAccess; signout.hidden = !noAccess;
 }
 
@@ -31,20 +47,48 @@ if (!isConfigured) {
   document.getElementById('admin-setup').hidden = false;
   loginControls.querySelectorAll('button').forEach((button) => { button.disabled = true; });
 } else {
-  onAuthStateChanged(auth, async (user) => {
+  onAuthStateChanged(auth, (user) => {
     const version = ++authVersion;
-    stopListeners();
-    currentAdmin = null;
+    if (accessUnsubscribe) { accessUnsubscribe(); accessUnsubscribe = null; }
+    clearAdminSession();
+    setMessage(loginMessage, '');
     content.hidden = true;
     if (!user) { showLogin(); return; }
+    if (!user.email) { showLogin({ noAccess: true }); return; }
+    loading.hidden = false; loginPanel.hidden = true; signout.hidden = true;
     try {
-      const token = await user.getIdTokenResult(true);
+      // Listen to the signed-in user's own record so granting or revoking access
+      // takes effect without relying on custom claims or a token refresh.
+      accessUnsubscribe = onSnapshot(doc(db, 'admins', user.uid), { includeMetadataChanges: true }, (snapshot) => {
+        if (version !== authVersion) return;
+        // Do not grant access on a stale offline cache. Firestore rules independently
+        // enforce the same UID, active flag and authenticated-email checks.
+        if (snapshot.metadata.fromCache) {
+          clearAdminSession();
+          showLogin({ noAccess: true, reason: 'Administrator access could not be verified. Check your connection and try again.' });
+          return;
+        }
+        const record = snapshot.exists() ? snapshot.data() : null;
+        if (record?.active !== true || record.email !== user.email) {
+          clearAdminSession(); showLogin({ noAccess: true }); return;
+        }
+        if (currentAdmin?.uid === user.uid) return;
+        currentAdmin = user;
+        setMessage(loginMessage, '');
+        loading.hidden = true; loginPanel.hidden = true; content.hidden = false; signout.hidden = false;
+        startAdmin();
+      }, (error) => {
+        if (version !== authVersion) return;
+        clearAdminSession();
+        showLogin({ noAccess: true, reason: 'Administrator access could not be verified. Please try again.' });
+        setMessage(loginMessage, errorMessage(error));
+      });
+    } catch (error) {
       if (version !== authVersion) return;
-      if (token.claims.admin !== true) { showLogin({ noAccess: true }); return; }
-      currentAdmin = user;
-      loading.hidden = true; loginPanel.hidden = true; content.hidden = false; signout.hidden = false;
-      startAdmin();
-    } catch (error) { showLogin({ noAccess: true }); setMessage(loginMessage, errorMessage(error)); }
+      clearAdminSession();
+      showLogin({ noAccess: true, reason: 'Administrator access could not be verified. Please try again.' });
+      setMessage(loginMessage, errorMessage(error));
+    }
   });
   signout.addEventListener('click', async () => { try { await signOut(auth); } catch (error) { setMessage(loginMessage, errorMessage(error)); } });
   loginForm.addEventListener('submit', async (event) => {

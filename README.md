@@ -6,7 +6,7 @@ FoodBridge PK connects surplus food from restaurants and food businesses with ve
 
 - Email/password and Google sign-in using Firebase Authentication, plus email password reset.
 - One application per Firebase account: restaurant/food business, welfare organization, or individual/family. Businesses and organizations provide contact and location details and a website/social page or links to photos/videos for verification. The website stores only the URLs; it does not upload files or use Firebase Storage. Applications are stored as `pending`; only an administrator can approve them. Applicants asked for changes can update and resubmit.
-- A separate administrator build, available at `/` or `/admin-dashboard.html` on its own deployment. It displays all three application types, reviews them with an optional note (required when asking for changes), and manages FoodBridge centers and partner meal locations. Administrator access is enforced by a Firebase custom claim, not by hiding the URL.
+- A separate administrator build, available at `/` or `/admin-dashboard.html` on its own deployment. It displays all three application types, reviews them with an optional note (required when asking for changes), and manages FoodBridge centers and partner meal locations. Administrator access is enforced by Firebase Authentication and a protected Firestore administrator record, not by hiding the URL.
 - Approved restaurants can publish surplus food at an active FoodBridge center, include preparation and safety details, cancel unbooked listings and confirm collection.
 - Approved organizations can browse available food, book the **whole** listing, provide their collector, phone, planned pickup time, transport and optional notes, and cancel a booking. Booking and release update the listing and booking atomically, preventing double-booking. **FoodBridge does not provide delivery**; the business arranges for the food to reach the center and the organization arranges collection.
 - Individuals can see active FoodBridge centers and partners immediately after registering, including while their application is under review. They cannot access food listings or booking/donation tools. Admins can still review individual registrations.
@@ -39,7 +39,22 @@ Use Node.js 22.13+ (or a supported newer LTS release) and npm.
 
 ## Create an administrator
 
-Create a dedicated user in Firebase Authentication first. For Google, the person can sign in once on the admin deployment (or at `/admin-dashboard.html` in local development) to create the Firebase user; the page will deny access until the claim is granted. On a trusted machine, use a service account or Application Default Credentials with Firebase Authentication administration permissions. Keep any JSON key **outside the repository**:
+First **publish the Firestore rules in this repository** to `food-bridge-53bb7` as described above. Until the rules are published, these administrator checks and the client write restrictions below are not active. Review your existing rules and data before replacing them.
+
+1. In Firebase Console → **Authentication → Users**, create or find the user who should be an administrator. Copy their **User UID** and their exact email address from Authentication. The user must be able to sign in with email/password or Google.
+2. In Firebase Console → **Firestore Database → Data**, create the collection `admins` (if it does not exist). Add a document with the **document ID equal to the Firebase Authentication UID**. Add these required fields (additional fields are ignored):
+
+   | Field | Firestore type | Value |
+   | --- | --- | --- |
+   | `active` | Boolean | `true` |
+   | `email` | String | The user's exact Firebase Authentication email |
+
+   For example, if the Authentication UID is `abc123`, the document path is `admins/abc123`; `abc123` is the document ID, not an extra required field. The email must match the authenticated account, including spelling and letter case.
+3. Have that user sign in to the administrator workspace. It listens for changes to the user's record. To revoke access, set `active` to `false` or delete the document using the Firebase Console. If the user's Authentication email changes, update the `email` field to match and sign in again if needed.
+
+The rules allow an authenticated user to read **only their own** administrator document. No browser client can list, create, update, or delete administrator records, even if already an administrator; manage them only through the Firebase Console or a trusted Admin SDK. The separate administrator URL is not a security boundary. Previously issued `admin: true` custom claims no longer grant access by themselves: create a matching active document for each existing administrator.
+
+As an optional alternative to the Console, on a trusted machine with Firebase Authentication and Firestore administration permissions, use the helper below. Keep any service-account JSON key **outside the repository**; the helper looks up the account in Authentication and writes its UID and exact email to Firestore:
 
 ```sh
 export FIREBASE_PROJECT_ID="food-bridge-53bb7"
@@ -48,7 +63,7 @@ npm run grant-admin -- --email admin@example.com
 # Alternatively: npm run grant-admin -- --uid FIREBASE_AUTH_UID
 ```
 
-The script preserves existing custom claims and adds `admin: true`. The admin must sign out and sign back in, or otherwise refresh their ID token, after the claim is added. The administrator workspace is not included in the public production build and is not linked from the public website. Deploy it as a second Vercel project as described below; locally it can be opened at `/admin-dashboard.html`. The separate URL alone is not a security boundary: the custom claim and rules enforce access.
+The administrator workspace is not included in the public production build and is not linked from the public website. Deploy it as a second Vercel project as described below; locally it can be opened at `/admin-dashboard.html`.
 
 In the admin workspace, add and publish confirmed locations. **FoodBridge center** locations appear in the restaurant listing form; both FoodBridge centers and **partner meal locations** appear in the individual directory. Editing or unpublishing a center makes listings with old center details unavailable for new bookings; the restaurant can cancel and recreate them. Already-booked pickups retain their original location details and should be coordinated directly.
 
@@ -78,7 +93,7 @@ For actual authorization and atomic-write tests, install Java 21+ and run the of
 npx firebase-tools emulators:exec --only firestore --project demo-foodbridge-pk "npm run test:rules"
 ```
 
-The emulator tests cover role isolation, admin approval, valid listing creation, double-booking, cancellation/collection, revoked restaurants, and verification URL validation. `npm test` reports these tests as **skipped** unless the emulators are running. The mocked UI tests do not replace emulator testing or a real Firebase integration check.
+The emulator tests cover protected administrator records and revocation, role isolation, admin approval, valid listing creation, double-booking, cancellation/collection, revoked restaurants, and verification URL validation. `npm test` reports these tests as **skipped** unless the emulators are running. The mocked UI tests do not replace emulator testing or a real Firebase integration check.
 
 As an optional Java-free check, the same rules suite can run with the **third-party**, Firebase-compatible Fireemu emulator (this does not replace testing against Google's official emulators or a Firebase test project):
 

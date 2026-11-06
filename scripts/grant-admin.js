@@ -2,6 +2,7 @@
 // script is never bundled into the website and never accepts browser input.
 import { applicationDefault, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
+import { getFirestore } from 'firebase-admin/firestore';
 
 const [kind, value] = process.argv.slice(2);
 const projectId = process.env.FIREBASE_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
@@ -11,12 +12,13 @@ if (!projectId || !['--email', '--uid'].includes(kind) || !value) {
   process.exit(1);
 }
 try {
-  initializeApp({ credential: applicationDefault(), projectId });
-  const auth = getAuth();
+  const app = initializeApp({ credential: applicationDefault(), projectId });
+  const auth = getAuth(app);
   const user = kind === '--email' ? await auth.getUserByEmail(value) : await auth.getUser(value);
-  await auth.setCustomUserClaims(user.uid, { ...(user.customClaims || {}), admin: true });
-  console.log(`Administrator claim granted to ${user.email || user.uid} (${user.uid}). Sign out and sign back in to refresh the token.`);
+  if (!user.email) throw new Error('The Firebase Authentication user must have an email address.');
+  await getFirestore(app).collection('admins').doc(user.uid).set({ active: true, email: user.email }, { merge: true });
+  console.log(`Administrator access enabled for ${user.email} (${user.uid}) in Firestore.`);
 } catch (error) {
-  console.error('Could not grant the claim:', error.message);
+  console.error('Could not update the administrator record:', error.message);
   process.exitCode = 1;
 }

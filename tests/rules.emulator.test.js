@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebase/rules-unit-testing';
-import { collection, doc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore';
 
 const emulatorDescribe = process.env.FIRESTORE_EMULATOR_HOST ? describe : describe.skip;
 const projectId = 'demo-foodbridge-pk';
@@ -74,10 +74,52 @@ emulatorDescribe('Firestore security rules (emulator)', () => {
       const db = context.firestore();
       await Promise.all([
         ...[['restaurant', 'restaurant', 'approved'], ['org1', 'organization', 'approved'], ['org2', 'organization', 'approved'], ['pendingorg', 'organization', 'pending'], ['individual', 'individual', 'pending']].map(([uid, role, status]) => setDoc(doc(db, 'profiles', uid), userProfile(uid, role, status))),
+        setDoc(doc(db, 'admins', 'admin'), { active: true, email: 'admin@example.com' }),
         setDoc(doc(db, 'centers', 'center'), centerData()),
         setDoc(doc(db, 'listings', 'food'), listingData())
       ]);
     });
+  });
+  it('lets users read only their own admin record and prevents all client-side admin grants', async () => {
+    const admin = dbFor('admin'); const regular = dbFor('org1');
+    await assertSucceeds(getDoc(doc(admin, 'admins', 'admin')));
+    await assertSucceeds(getDoc(doc(regular, 'admins', 'org1'))); // even an absent record may be checked
+    await assertFails(getDoc(doc(regular, 'admins', 'admin')));
+    await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(), 'admins', 'admin')));
+    await assertFails(getDocs(collection(admin, 'admins')));
+    await assertFails(setDoc(doc(regular, 'admins', 'org1'), { active: true, email: 'org1@example.com' }));
+    await assertFails(setDoc(doc(admin, 'admins', 'other'), { active: true, email: 'other@example.com' }));
+    await assertFails(updateDoc(doc(admin, 'admins', 'admin'), { active: false }));
+    await assertFails(deleteDoc(doc(admin, 'admins', 'admin')));
+  });
+  it('requires the correct UID, an active Boolean and the exact authenticated email', async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await Promise.all([
+        setDoc(doc(db, 'admins', 'inactive'), { active: false, email: 'inactive@example.com' }),
+        setDoc(doc(db, 'admins', 'mismatch'), { active: true, email: 'other@example.com' }),
+        setDoc(doc(db, 'admins', 'badtype'), { active: 'true', email: 'badtype@example.com' }),
+        setDoc(doc(db, 'admins', 'noemail'), { active: true })
+      ]);
+    });
+    for (const uid of ['inactive', 'mismatch', 'badtype', 'noemail', 'absent']) {
+      await assertFails(getDocs(collection(dbFor(uid), 'profiles')));
+    }
+    await assertFails(getDocs(collection(dbFor('claimonly', { admin: true }), 'profiles')));
+    await assertFails(getDocs(collection(dbFor('admin', { email: 'wrong@example.com' }), 'profiles')));
+    await assertFails(getDocs(collection(dbFor('admin', { email: null }), 'profiles')));
+    await assertSucceeds(getDocs(collection(dbFor('admin'), 'profiles')));
+  });
+  it('grants and immediately revokes access when a trusted operator changes the admin document', async () => {
+    const user = dbFor('newadmin');
+    const profiles = collection(user, 'profiles');
+    await assertFails(getDocs(profiles));
+    await env.withSecurityRulesDisabled(async (context) => setDoc(doc(context.firestore(), 'admins', 'newadmin'), { active: true, email: 'newadmin@example.com' }));
+    await assertSucceeds(getDocs(profiles));
+    await env.withSecurityRulesDisabled(async (context) => updateDoc(doc(context.firestore(), 'admins', 'newadmin'), { active: false }));
+    await assertFails(getDocs(profiles));
+    await env.withSecurityRulesDisabled(async (context) => deleteDoc(doc(context.firestore(), 'admins', 'newadmin')));
+    await assertFails(getDocs(profiles));
   });
   it('lets users submit only pending registrations and only admins approve them', async () => {
     const newcomer = dbFor('newuser');
@@ -86,8 +128,8 @@ emulatorDescribe('Firestore security rules (emulator)', () => {
     await assertFails(updateDoc(doc(newcomer, 'profiles', 'newuser'), { status: 'approved' }));
     await assertFails(getDoc(doc(dbFor('org1'), 'profiles', 'newuser')));
     await assertFails(setDoc(doc(dbFor('fraud'), 'profiles', 'fraud'), { ...userProfile('fraud', 'restaurant', 'approved'), createdAt: serverTimestamp(), consentAt: serverTimestamp(), updatedAt: serverTimestamp() }));
-    await assertSucceeds(updateDoc(doc(dbFor('admin', { admin: true }), 'profiles', 'newuser'), { status: 'approved', reviewNote: '', reviewedBy: 'admin', reviewedAt: serverTimestamp(), updatedAt: serverTimestamp() }));
-    await assertSucceeds(getDocs(collection(dbFor('admin', { admin: true }), 'profiles')));
+    await assertSucceeds(updateDoc(doc(dbFor('admin'), 'profiles', 'newuser'), { status: 'approved', reviewNote: '', reviewedBy: 'admin', reviewedAt: serverTimestamp(), updatedAt: serverTimestamp() }));
+    await assertSucceeds(getDocs(collection(dbFor('admin'), 'profiles')));
   });
   it('allows photo or video links without Storage and rejects unsafe or excessive evidence', async () => {
     const applicant = dbFor('newrestaurant');
@@ -102,7 +144,7 @@ emulatorDescribe('Firestore security rules (emulator)', () => {
     await assertFails(getDoc(doc(dbFor('individual'), 'profiles', 'newrestaurant')));
   });
   it('allows a rejected applicant to resubmit without changing role, email or original submission time', async () => {
-    const admin = dbFor('admin', { admin: true });
+    const admin = dbFor('admin');
     const org = dbFor('org1');
     const profileRef = doc(org, 'profiles', 'org1');
     await assertSucceeds(updateDoc(doc(admin, 'profiles', 'org1'), {
@@ -162,7 +204,7 @@ emulatorDescribe('Firestore security rules (emulator)', () => {
   });
   it('allows an administrator to withdraw an available listing but not another participant', async () => {
     await assertFails(updateDoc(doc(dbFor('org1'), 'listings', 'food'), { status: 'cancelled', updatedAt: serverTimestamp() }));
-    await assertSucceeds(updateDoc(doc(dbFor('admin', { admin: true }), 'listings', 'food'), { status: 'cancelled', updatedAt: serverTimestamp() }));
+    await assertSucceeds(updateDoc(doc(dbFor('admin'), 'listings', 'food'), { status: 'cancelled', updatedAt: serverTimestamp() }));
   });
   it('prevents booking if a center or restaurant loses approval', async () => {
     await env.withSecurityRulesDisabled(async (context) => updateDoc(doc(context.firestore(), 'centers', 'center'), { active: false }));

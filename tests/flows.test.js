@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 // A small in-memory SDK double exercises the actual page handlers without a
 // Firebase project. It is NOT a substitute for the separate emulator rules tests.
-const fake = vi.hoisted(() => ({ docs: new Map(), subscriptions: new Set(), authSubscriptions: new Set(), authSynchronous: false, user: null, writes: [], nextId: 0, notify: () => {}, stamp: null }));
+const fake = vi.hoisted(() => ({ docs: new Map(), subscriptions: new Set(), authSubscriptions: new Set(), authSynchronous: false, fromCache: false, user: null, writes: [], nextId: 0, notify: () => {}, stamp: null }));
 vi.mock('../src/firebase.js', () => ({ isConfigured: true, auth: {}, db: {}, googleProvider: {}, errorMessage: (error) => error.message || 'Error' }));
 vi.mock('../src/model.js', async (importOriginal) => ({ ...(await importOriginal()), dashboardFor: () => '#account' }));
 vi.mock('firebase/auth', () => {
@@ -34,7 +34,7 @@ vi.mock('firebase/firestore', () => {
   const snapshot = (reference) => {
     if (reference.kind === 'doc') {
       const data = fake.docs.get(key(reference));
-      return { id: reference.id, exists: () => data !== undefined, data: () => data };
+      return { id: reference.id, exists: () => data !== undefined, data: () => data, metadata: { fromCache: fake.fromCache } };
     }
     const base = reference.kind === 'query' ? reference.collection : reference;
     const filters = reference.filters || [];
@@ -53,7 +53,7 @@ vi.mock('firebase/firestore', () => {
     where: (field, _operator, value) => ({ field, value }),
     getDoc: vi.fn(async (reference) => snapshot(reference)),
     getDocs: vi.fn(async (reference) => snapshot(reference)),
-    onSnapshot: (reference, callback) => { const sub = { reference, callback }; fake.subscriptions.add(sub); queueMicrotask(() => { if (fake.subscriptions.has(sub)) callback(snapshot(reference)); }); return () => fake.subscriptions.delete(sub); },
+    onSnapshot: (reference, optionsOrCallback, next) => { const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : next; const sub = { reference, callback }; fake.subscriptions.add(sub); queueMicrotask(() => { if (fake.subscriptions.has(sub)) callback(snapshot(reference)); }); return () => fake.subscriptions.delete(sub); },
     serverTimestamp: () => MockTimestamp.fromDate(new Date()),
     Timestamp: MockTimestamp,
     setDoc: vi.fn(async (reference, value) => { save(reference, value); fake.notify(); }),
@@ -76,11 +76,12 @@ function fill(id, value) { document.getElementById(id).value = value; }
 function submit(id) { document.getElementById(id).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); }
 const wait = (condition) => vi.waitFor(() => expect(condition()).toBeTruthy(), { timeout: 2500 });
 const profile = (role, status = 'approved') => ({ role, status, name: role === 'organization' ? 'Helping Hands' : 'Good Kitchen', contactName: 'Contact Person', phone: '03001234567', city: 'Karachi' });
+const signInAdmin = () => { fake.user = { uid: 'admin', email: 'admin@example.com' }; fake.docs.set('admins/admin', { active: true, email: 'admin@example.com' }); };
 const center = () => ({ name: 'Center One', type: 'foodbridge', city: 'Karachi', address: 'Confirmed address', hours: '12 to 4', phone: '', mapUrl: '', active: true });
 const local = (milliseconds) => { const d = new Date(milliseconds); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
 
 beforeEach(() => {
-  vi.resetModules(); fake.docs.clear(); fake.subscriptions.clear(); fake.authSubscriptions.clear(); fake.writes.length = 0; fake.user = null; fake.authSynchronous = false; fake.nextId = 0;
+  vi.resetModules(); fake.docs.clear(); fake.subscriptions.clear(); fake.authSubscriptions.clear(); fake.writes.length = 0; fake.user = null; fake.authSynchronous = false; fake.fromCache = false; fake.nextId = 0;
   document.body.innerHTML = '';
   vi.spyOn(window, 'confirm').mockReturnValue(true);
   HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -171,7 +172,7 @@ describe('registration and role-specific workflows with a mocked Firebase SDK', 
     expect(fake.docs.get('profiles/org1')).not.toHaveProperty('evidencePaths');
   });
   it('shows safe verification links in the admin workspace without injecting unsafe URLs', async () => {
-    fake.user = { uid: 'admin', email: 'admin@example.com', getIdTokenResult: async () => ({ claims: { admin: true } }) };
+    signInAdmin();
     fake.docs.set('profiles/org1', { ...profile('organization', 'pending'), uid: 'org1', email: 'org1@example.com', address: 'Address', website: '', description: 'Our work', evidenceUrls: ['https://example.com/photo.jpg', 'javascript:alert(1)'], createdAt: { toDate: () => new Date(), toMillis: () => Date.now() } });
     load('admin-dashboard.html', '/admin-dashboard.html');
     await import('../src/pages/admin.js');
@@ -244,15 +245,49 @@ describe('registration and role-specific workflows with a mocked Firebase SDK', 
     expect(document.getElementById('individual-status').textContent).toMatch(/registration is complete/i);
     expect(document.querySelector('#site-header').textContent).not.toMatch(/donate|share food|available food|admin/i);
   });
-  it('denies the admin workspace to a signed-in account without the admin claim', async () => {
-    fake.user = { uid: 'person', email: 'person@example.com', getIdTokenResult: async () => ({ claims: {} }) };
+  it.each([
+    ['no record', null, 'person@example.com'],
+    ['inactive record', { active: false, email: 'person@example.com' }, 'person@example.com'],
+    ['string instead of Boolean', { active: 'true', email: 'person@example.com' }, 'person@example.com'],
+    ['wrong email', { active: true, email: 'different@example.com' }, 'person@example.com'],
+    ['missing email', { active: true }, 'person@example.com'],
+    ['no authenticated email', { active: true, email: 'person@example.com' }, null]
+  ])('denies administrator access with %s even if the user has an old claim', async (_label, record, email) => {
+    fake.user = { uid: 'person', email, getIdTokenResult: async () => ({ claims: { admin: true } }) };
+    if (record) fake.docs.set('admins/person', record);
+    fake.docs.set('admins/someone-else', { active: true, email: 'person@example.com' });
     load('admin-dashboard.html', '/admin-dashboard.html');
     await import('../src/pages/admin.js');
     await wait(() => !document.getElementById('admin-denied').hidden);
     expect(document.getElementById('admin-content').hidden).toBe(true);
   });
+  it('grants and revokes an authenticated admin immediately when the matching record changes', async () => {
+    fake.user = { uid: 'person', email: 'person@example.com' };
+    fake.docs.set('profiles/private', { ...profile('organization', 'pending'), uid: 'private', email: 'private@example.com' });
+    load('admin-dashboard.html', '/admin-dashboard.html');
+    await import('../src/pages/admin.js');
+    await wait(() => !document.getElementById('admin-denied').hidden);
+    fake.docs.set('admins/person', { active: true, email: 'person@example.com' }); fake.notify();
+    await wait(() => !document.getElementById('admin-content').hidden);
+    await wait(() => document.getElementById('admin-applications').textContent.includes('Helping Hands'));
+    fake.docs.set('admins/person', { active: false, email: 'person@example.com' }); fake.notify();
+    await wait(() => !document.getElementById('admin-denied').hidden);
+    expect(document.getElementById('admin-content').hidden).toBe(true);
+    expect(document.getElementById('admin-applications').textContent).not.toContain('Helping Hands');
+    expect(fake.subscriptions.size).toBe(1); // only the user's own admin record remains watched
+  });
+  it('does not grant admin access from an offline cached record', async () => {
+    signInAdmin(); fake.fromCache = true;
+    load('admin-dashboard.html', '/admin-dashboard.html');
+    await import('../src/pages/admin.js');
+    await wait(() => !document.getElementById('admin-denied').hidden);
+    expect(document.getElementById('admin-denied').textContent).toMatch(/connection/i);
+    expect(document.getElementById('admin-content').hidden).toBe(true);
+    fake.fromCache = false; fake.notify();
+    await wait(() => !document.getElementById('admin-content').hidden);
+  });
   it('withdraws available listings when an administrator requests changes from an approved restaurant', async () => {
-    fake.user = { uid: 'admin', email: 'admin@example.com', getIdTokenResult: async () => ({ claims: { admin: true } }) };
+    signInAdmin();
     fake.docs.set('profiles/restaurant', { ...profile('restaurant'), uid: 'restaurant', email: 'restaurant@example.com', address: 'Address', website: 'https://example.org', description: 'Our work', evidenceUrls: [], createdAt: { toDate: () => new Date(), toMillis: () => Date.now() } });
     fake.docs.set('listings/food1', { restaurantId: 'restaurant', status: 'available' });
     fake.docs.set('listings/food2', { restaurantId: 'restaurant', status: 'booked' });
@@ -268,8 +303,8 @@ describe('registration and role-specific workflows with a mocked Firebase SDK', 
     expect(fake.docs.get('profiles/restaurant').status).toBe('rejected');
     expect(fake.docs.get('listings/food2').status).toBe('booked');
   });
-  it('lets a claimed administrator review a pending application', async () => {
-    fake.user = { uid: 'admin', email: 'admin@example.com', getIdTokenResult: async () => ({ claims: { admin: true } }) };
+  it('lets a Firestore-authorized administrator review a pending application', async () => {
+    signInAdmin();
     fake.docs.set('profiles/org1', { ...profile('organization', 'pending'), uid: 'org1', email: 'org1@example.com', address: 'Address', website: 'https://example.org', description: 'Our work', evidenceUrls: [], createdAt: { toDate: () => new Date(), toMillis: () => Date.now() } });
     load('admin-dashboard.html', '/admin-dashboard.html');
     await import('../src/pages/admin.js');

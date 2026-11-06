@@ -2,8 +2,20 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    function admin() { return signedIn() && ('admin' in request.auth.token) && request.auth.token.admin == true; }
     function owner(uid) { return signedIn() && request.auth.uid == uid; }
+    function adminPath() { return /databases/$(database)/documents/admins/$(request.auth.uid); }
+    // Admin access comes only from a trusted console/Admin SDK write to the
+    // authenticated user's own admins document. Client writes are never allowed.
+    function admin() {
+      return signedIn() && ('email' in request.auth.token) && request.auth.token.email is string
+        && exists(adminPath()) && get(adminPath()).data.keys().hasAll(['active','email'])
+        && get(adminPath()).data.active == true && get(adminPath()).data.email == request.auth.token.email;
+    }
+    match /admins/{uid} {
+      // Users may check their own access, including an absent or inactive record.
+      allow get: if owner(uid);
+      allow list, create, update, delete: if false;
+    }
     function profilePath() { return /databases/$(database)/documents/profiles/$(request.auth.uid); }
     function hasProfile() { return signedIn() && exists(profilePath()); }
     function profile() { return get(profilePath()).data; }
