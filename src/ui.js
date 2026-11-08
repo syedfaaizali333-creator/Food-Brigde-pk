@@ -1,7 +1,7 @@
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from './firebase.js';
-import { dashboardFor, escapeHTML } from './model.js';
+import { dashboardFor, escapeHTML, safeFoodImageUrl } from './model.js';
 import { logOut } from './session.js';
 
 const brand = `<a class="brand" href="index.html" aria-label="FoodBridge PK home"><span class="brand-symbol" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><path d="M8 22c2.3 6.3 6.6 9.5 12 9.5S29.7 28.3 32 22" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/><path d="M20 24V9m0 9c-5.8.1-8.7-3.1-8.7-8 5.8-.2 8.7 3.1 8.7 8Zm0-3c0-4.7 3.2-7.7 8.3-7.8.3 4.9-2.5 7.9-8.3 7.8Z" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="brand-word">foodbridge<span class="brand-pk"> PK</span><small>SHARE THE GOOD</small></span></a>`;
@@ -25,12 +25,25 @@ export function busy(button, isBusy, label = 'Please wait…') {
   button.disabled = isBusy;
 }
 
+// Listing images are untrusted external URLs. Do not create markup for unsafe
+// protocols or credential-bearing URLs, and never insert unescaped attributes.
+export function foodPhotoMarkup(rawUrl, title) {
+  const url = safeFoodImageUrl(rawUrl);
+  return url ? `<img class="food-photo" src="${escapeHTML(url)}" alt="Photo of ${escapeHTML(title || 'food')}" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '';
+}
+
+export function hideBrokenFoodPhotos(container) {
+  container.addEventListener('error', (event) => {
+    if (event.target.matches?.('img.food-photo')) event.target.hidden = true;
+  }, true);
+}
+
 export function installShell() {
   const header = document.getElementById('site-header');
   const footer = document.getElementById('site-footer');
   if (header) {
     header.className = 'site-header';
-    header.innerHTML = `<div class="wrap nav-inner">${brand}<button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="site-nav"><span></span><span></span><span></span></button><nav id="site-nav" class="site-nav" aria-label="Main navigation"><div class="nav-links"><a href="index.html">Home</a><a href="index.html#how-it-works">How it works</a><a href="about.html">About</a><a href="impact.html">Food safety</a></div><div id="account-nav" class="account-nav"><a class="nav-login" href="login.html">Log in</a><a class="button button-primary button-small" href="register.html">Join FoodBridge <span aria-hidden="true">↗</span></a></div></nav></div>`;
+    header.innerHTML = `<div class="wrap nav-inner">${brand}<button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="site-nav"><span></span><span></span><span></span></button><nav id="site-nav" class="site-nav" aria-label="Main navigation"><div class="nav-links"><a href="index.html">Home</a><a href="index.html#how-it-works">How it works</a><a href="about.html">About</a><a href="impact.html">Food safety</a></div><div id="account-nav" class="account-nav"><a class="button button-secondary button-small" href="register.html">Sign in</a><a class="button button-primary button-small" href="register.html">Join FoodBridge <span aria-hidden="true">↗</span></a></div></nav></div>`;
     const toggle = header.querySelector('.menu-toggle');
     const nav = header.querySelector('#site-nav');
     toggle.addEventListener('click', () => {
@@ -57,7 +70,7 @@ export function installShell() {
   onAuthStateChanged(auth, (user) => {
     if (stopProfileListener) stopProfileListener();
     if (!user) {
-      accountNav.innerHTML = '<a class="nav-login" href="login.html">Log in</a><a class="button button-primary button-small" href="register.html">Join FoodBridge <span aria-hidden="true">↗</span></a>';
+      accountNav.innerHTML = '<a class="button button-secondary button-small" href="register.html">Sign in</a><a class="button button-primary button-small" href="register.html">Join FoodBridge <span aria-hidden="true">↗</span></a>';
       return;
     }
     const render = (profile) => {

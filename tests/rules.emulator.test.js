@@ -188,6 +188,22 @@ emulatorDescribe('Firestore security rules (emulator)', () => {
     await assertFails(setDoc(doc(dbFor('restaurant'), 'listings', 'wrong-center'), { ...payload, centerAddress: 'Fake address' }));
     await assertFails(setDoc(doc(dbFor('restaurant'), 'listings', 'wrong-owner'), { ...payload, restaurantId: 'someone-else' }));
   });
+  it('allows an optional food-photo URL, rejects unsafe values, and preserves booking transitions', async () => {
+    const restaurant = dbFor('restaurant');
+    const payload = { ...listingData(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() };
+    await assertSucceeds(setDoc(doc(restaurant, 'listings', 'legacy-no-photo'), payload));
+    await assertSucceeds(setDoc(doc(restaurant, 'listings', 'empty-photo'), { ...payload, imageUrl: '' }));
+    await assertSucceeds(setDoc(doc(restaurant, 'listings', 'with-photo'), { ...payload, imageUrl: 'https://example.org/rice.jpg' }));
+    for (const [index, imageUrl] of ['javascript:alert(1)', 'data:image/png;base64,abc', 'https://example.org/' + 'x'.repeat(500), 123, null].entries()) {
+      await assertFails(setDoc(doc(restaurant, 'listings', `bad-photo-${index}`), { ...payload, imageUrl }));
+    }
+    await assertFails(updateDoc(doc(restaurant, 'listings', 'with-photo'), { imageUrl: 'https://example.org/other.jpg', status: 'cancelled', updatedAt: serverTimestamp() }));
+    await env.withSecurityRulesDisabled(async (context) => updateDoc(doc(context.firestore(), 'listings', 'food'), { imageUrl: 'https://example.org/rice.jpg' }));
+    const organization = dbFor('org1');
+    await assertSucceeds(reserve(organization, 'org1', 'photo-booking'));
+    expect((await getDoc(doc(organization, 'listings', 'food'))).data().imageUrl).toBe('https://example.org/rice.jpg');
+    await assertSucceeds(cancel(organization, 'photo-booking'));
+  });
   it('requires an atomic booking, prevents double-booking, and supports cancellation and collection', async () => {
     const org1 = dbFor('org1'); const org2 = dbFor('org2');
     await assertFails(updateDoc(doc(org1, 'listings', 'food'), { status: 'booked', bookedBy: 'org1', bookingId: 'unpaired', updatedAt: serverTimestamp() }));

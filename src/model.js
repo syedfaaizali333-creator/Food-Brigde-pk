@@ -21,6 +21,26 @@ export function safeExternalUrl(value) {
   }
 }
 
+// Food images are fetched automatically by viewers' browsers. In addition to
+// the common URL checks, reject local/private literal hosts and overlong URLs.
+// Hostnames may still resolve differently; external hosts can see viewers' IPs.
+export function safeFoodImageUrl(value) {
+  if (typeof value !== 'string') return '';
+  const url = safeExternalUrl(value);
+  if (!url || url.length > 500) return '';
+  const host = new URL(url).hostname.toLowerCase().replace(/\.$/, '');
+  if (host === 'localhost' || host.endsWith('.localhost') || host === 'local' || host.endsWith('.local') || host.startsWith('[')) return '';
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+    const [first, second] = host.split('.').map(Number);
+    if (first === 0 || first === 10 || first === 127 || first >= 224
+      || (first === 100 && second >= 64 && second <= 127)
+      || (first === 169 && second === 254)
+      || (first === 172 && second >= 16 && second <= 31)
+      || (first === 192 && second === 168)) return '';
+  }
+  return url;
+}
+
 // Accept links to externally hosted photos or videos, one per line. The site
 // does not upload the files or fetch the URLs; reviewers open links themselves.
 export function parseEvidenceUrls(value = '') {

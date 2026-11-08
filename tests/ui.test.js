@@ -20,6 +20,7 @@ describe('public navigation and registration', () => {
     await import('../src/pages/static.js');
     const nav = document.querySelector('#site-header');
     expect(nav.textContent).toContain('Join FoodBridge');
+    expect(nav.querySelector('a[href="register.html"]').textContent).toBe('Sign in');
     expect(nav.textContent).not.toMatch(/admin|add food|donate food/i);
     const toggle = nav.querySelector('.menu-toggle');
     toggle.click();
@@ -29,6 +30,8 @@ describe('public navigation and registration', () => {
   it('shows verification fields only for businesses and organizations', async () => {
     loadPage('register.html', '/register.html?role=restaurant');
     await import('../src/pages/register.js');
+    expect(document.getElementById('register-form').hidden).toBe(true);
+    expect(document.getElementById('google-register').disabled).toBe(true);
     expect(document.querySelector('input[name=role]:checked').value).toBe('restaurant');
     expect(document.querySelector('#register-contact').closest('[data-business-only]').hidden).toBe(false);
     expect(document.querySelector('#register-contact').required).toBe(true);
@@ -46,6 +49,22 @@ describe('public navigation and registration', () => {
     expect(document.querySelector('#setup-message').hidden).toBe(false);
     expect(document.querySelector('#google-login').disabled).toBe(true);
     expect(document.querySelector('#login-form button[type=submit]').disabled).toBe(true);
+  });
+  it('renders only safe food images and hides a failed image', async () => {
+    const { foodPhotoMarkup, hideBrokenFoodPhotos } = await import('../src/ui.js');
+    expect(foodPhotoMarkup('javascript:alert(1)', 'Rice')).toBe('');
+    expect(foodPhotoMarkup('http://127.0.0.1/food.jpg', 'Rice')).toBe('');
+    expect(foodPhotoMarkup(undefined, 'Rice')).toBe('');
+    document.body.innerHTML = `<div id="cards">${foodPhotoMarkup('https://example.org/food.jpg?a=1&b=2', 'Rice " onerror="bad')}</div>`;
+    const cards = document.getElementById('cards');
+    const image = cards.querySelector('img');
+    expect(image.getAttribute('src')).toBe('https://example.org/food.jpg?a=1&b=2');
+    expect(image.getAttribute('alt')).toBe('Photo of Rice " onerror="bad');
+    expect(image.hasAttribute('onerror')).toBe(false);
+    expect(image.getAttribute('referrerpolicy')).toBe('no-referrer');
+    hideBrokenFoodPhotos(cards);
+    image.dispatchEvent(new Event('error'));
+    expect(image.hidden).toBe(true);
   });
   it('keeps the restaurant donation form and its action hidden without Firebase access', async () => {
     loadPage('donor-dashboard.html', '/donor-dashboard.html');

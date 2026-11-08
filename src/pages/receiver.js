@@ -2,7 +2,7 @@ import { collection, doc, onSnapshot, query, runTransaction, serverTimestamp, Ti
 import { db, errorMessage } from '../firebase.js';
 import { escapeHTML, formatDate, localDateTimeValue, validatePickupTime } from '../model.js';
 import { protectPage } from '../session.js';
-import { busy, installShell, setMessage } from '../ui.js';
+import { busy, foodPhotoMarkup, hideBrokenFoodPhotos, installShell, setMessage } from '../ui.js';
 
 installShell();
 async function init() {
@@ -23,6 +23,7 @@ if (session) {
   let centersLoaded = false;
   let selected = null;
   let bookingInFlight = false;
+  hideBrokenFoodPhotos(availableList);
 
   function renderAvailable() {
     const text = search.value.trim().toLowerCase();
@@ -37,7 +38,7 @@ if (session) {
       availableList.innerHTML = `<div class="empty-state">${active.length ? 'No food matches your search.' : 'There is no food available to book right now. Please check back later.'}</div>`;
       return;
     }
-    availableList.innerHTML = matches.map((item) => `<article class="data-card listing-card"><div class="card-heading"><div><span class="pill">${escapeHTML(item.category)}</span><h3 style="margin-top:10px">${escapeHTML(item.title)}</h3><p>From ${escapeHTML(item.restaurantName)} · ${escapeHTML(item.quantity)} ${escapeHTML(item.unit)}</p></div></div><div class="meta-grid"><div class="meta-item"><strong>FoodBridge center</strong>${escapeHTML(item.centerName)}<br>${escapeHTML(item.centerAddress)}, ${escapeHTML(item.centerCity)}</div><div class="meta-item"><strong>Pickup window</strong>${escapeHTML(formatDate(item.availableFrom))}<br>to ${escapeHTML(formatDate(item.pickupBy))}</div><div class="meta-item"><strong>Prepared / packed</strong>${escapeHTML(formatDate(item.preparedAt))}</div><div class="meta-item"><strong>Business phone</strong>${escapeHTML(item.restaurantPhone)}</div></div><p><strong>Food & ingredients:</strong> ${escapeHTML(item.description)}</p><p><strong>Allergens:</strong> ${escapeHTML(item.allergens)}</p><p><strong>Storage:</strong> ${escapeHTML(item.storageInstructions)}</p><div class="card-actions"><button class="button button-primary button-small" type="button" data-book="${escapeHTML(item.id)}">Book pickup →</button></div></article>`).join('');
+    availableList.innerHTML = matches.map((item) => `<article class="data-card listing-card">${foodPhotoMarkup(item.imageUrl, item.title)}<div class="card-heading"><div><span class="pill">${escapeHTML(item.category)}</span><h3 style="margin-top:10px">${escapeHTML(item.title)}</h3><p>From ${escapeHTML(item.restaurantName)} · ${escapeHTML(item.quantity)} ${escapeHTML(item.unit)}</p></div></div><div class="meta-grid"><div class="meta-item"><strong>FoodBridge center</strong>${escapeHTML(item.centerName)}<br>${escapeHTML(item.centerAddress)}, ${escapeHTML(item.centerCity)}</div><div class="meta-item"><strong>Pickup window</strong>${escapeHTML(formatDate(item.availableFrom))}<br>to ${escapeHTML(formatDate(item.pickupBy))}</div><div class="meta-item"><strong>Prepared / packed</strong>${escapeHTML(formatDate(item.preparedAt))}</div><div class="meta-item"><strong>Business phone</strong>${escapeHTML(item.restaurantPhone)}</div></div><p><strong>Food & ingredients:</strong> ${escapeHTML(item.description)}</p><p><strong>Allergens:</strong> ${escapeHTML(item.allergens)}</p><p><strong>Storage:</strong> ${escapeHTML(item.storageInstructions)}</p><div class="card-actions"><button class="button button-primary button-small" type="button" data-book="${escapeHTML(item.id)}">Book pickup →</button></div></article>`).join('');
   }
   search.addEventListener('input', renderAvailable);
   window.setInterval(renderAvailable, 60000);

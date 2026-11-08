@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dashboardFor, escapeHTML, safeExternalUrl, parseEvidenceUrls, validateListingTimes, validatePickupTime } from '../src/model.js';
+import { dashboardFor, escapeHTML, safeExternalUrl, safeFoodImageUrl, parseEvidenceUrls, validateListingTimes, validatePickupTime } from '../src/model.js';
 
 describe('account routing', () => {
   it('sends each role to its own approved or pending experience', () => {
@@ -20,6 +20,17 @@ describe('input and output safety', () => {
     expect(safeExternalUrl('data:text/html,hello')).toBe('');
     expect(safeExternalUrl('https://example.org/about')).toBe('https://example.org/about');
     expect(safeExternalUrl('https://user:password@example.org')).toBe('');
+  });
+  it('accepts public food-photo URLs and rejects unsafe or local hosts', () => {
+    expect(safeFoodImageUrl('https://example.org/food.jpg')).toBe('https://example.org/food.jpg');
+    expect(safeFoodImageUrl('http://8.8.8.8/photo.png')).toBe('http://8.8.8.8/photo.png');
+    for (const url of [
+      'javascript:alert(1)', 'data:image/png;base64,abc', 'https://user:pass@example.org/a',
+      'http://localhost/image', 'https://localhost./image', 'http://app.local/image',
+      'http://127.0.0.1/image', 'http://0x7f000001/image', 'http://10.2.3.4/image',
+      'http://172.16.1.2/image', 'http://192.168.1.2/image', 'http://169.254.1.1/image',
+      'http://[::1]/image', 'https://example.org/' + 'é'.repeat(100), 123
+    ]) expect(safeFoodImageUrl(url)).toBe('');
   });
   it('accepts up to five safe photo or video URLs, one per line', () => {
     expect(parseEvidenceUrls(' https://example.org/photo.jpg \n\nhttps://videos.example/video ')).toEqual({

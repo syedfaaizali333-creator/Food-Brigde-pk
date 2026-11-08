@@ -102,7 +102,8 @@ service cloud.firestore {
     }
     function validListing(d) {
       return d.keys().hasAll(['restaurantId','restaurantName','restaurantPhone','title','category','quantity','unit','description','allergens','storageInstructions','preparedAt','availableFrom','pickupBy','centerId','centerName','centerAddress','centerCity','status','bookedBy','bookingId','createdAt','updatedAt'])
-        && d.keys().hasOnly(['restaurantId','restaurantName','restaurantPhone','title','category','quantity','unit','description','allergens','storageInstructions','preparedAt','availableFrom','pickupBy','centerId','centerName','centerAddress','centerCity','status','bookedBy','bookingId','createdAt','updatedAt'])
+        && d.keys().hasOnly(['restaurantId','restaurantName','restaurantPhone','title','category','quantity','unit','description','allergens','storageInstructions','imageUrl','preparedAt','availableFrom','pickupBy','centerId','centerName','centerAddress','centerCity','status','bookedBy','bookingId','createdAt','updatedAt'])
+        && (!('imageUrl' in d) || optionalUrl(d.imageUrl))
         && bounded(d.restaurantId, 1, 128) && bounded(d.restaurantName, 1, 120) && bounded(d.restaurantPhone, 7, 30)
         && bounded(d.title, 1, 120) && d.category in ['Prepared meal','Fresh produce','Bakery','Packaged food','Other']
         && d.quantity is int && d.quantity > 0 && d.quantity <= 100000

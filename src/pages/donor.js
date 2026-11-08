@@ -1,8 +1,8 @@
 import { collection, doc, onSnapshot, query, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore';
 import { db, errorMessage } from '../firebase.js';
-import { escapeHTML, formatDate, validateListingTimes } from '../model.js';
+import { escapeHTML, formatDate, safeFoodImageUrl, validateListingTimes } from '../model.js';
 import { protectPage } from '../session.js';
-import { busy, installShell, setMessage } from '../ui.js';
+import { busy, foodPhotoMarkup, hideBrokenFoodPhotos, installShell, setMessage } from '../ui.js';
 
 installShell();
 async function init() {
@@ -21,6 +21,42 @@ if (session) {
   let listings = [];
   let bookings = [];
   let posting = false;
+  hideBrokenFoodPhotos(list);
+
+  const imageInput = field('image-url');
+  const imagePreview = document.getElementById('food-image-preview');
+  const imageWarning = document.getElementById('food-image-warning');
+  let previewUrl = '';
+  function clearImagePreview() {
+    previewUrl = '';
+    imagePreview.hidden = true;
+    imagePreview.removeAttribute('src');
+    imageWarning.hidden = true;
+  }
+  function showImageWarning(text) { imageWarning.textContent = text; imageWarning.hidden = false; }
+  imageInput.addEventListener('input', clearImagePreview);
+  imageInput.addEventListener('change', () => {
+    clearImagePreview();
+    const input = imageInput.value.trim();
+    if (!input) return;
+    const url = safeFoodImageUrl(input);
+    if (!url) {
+      showImageWarning('Enter a public http:// or https:// image link of at most 500 characters.');
+      return;
+    }
+    previewUrl = url;
+    imagePreview.src = url;
+  });
+  imagePreview.addEventListener('load', () => {
+    if (!previewUrl || imagePreview.src !== previewUrl) return;
+    imagePreview.hidden = false;
+    imageWarning.hidden = true;
+  });
+  imagePreview.addEventListener('error', () => {
+    if (!previewUrl || imagePreview.src !== previewUrl) return;
+    imagePreview.hidden = true;
+    showImageWarning('Could not load the preview. Check that the link opens a public image directly.');
+  });
 
   onSnapshot(query(collection(db, 'centers'), where('active', '==', true)), (snapshot) => {
     const previous = select.value;
@@ -50,7 +86,7 @@ if (session) {
       let action = '';
       if (item.status === 'available') action = `<button class="button button-danger button-small" type="button" data-action="cancel" data-id="${escapeHTML(item.id)}">Cancel listing</button>`;
       if (item.status === 'booked') action = `<button class="button button-primary button-small" type="button" data-action="collect" data-id="${escapeHTML(item.id)}" data-booking="${escapeHTML(item.bookingId)}">Mark collected</button>`;
-      return `<article class="data-card"><div class="card-heading"><div><h3>${escapeHTML(item.title)}</h3><p>${escapeHTML(item.quantity)} ${escapeHTML(item.unit)} · ${escapeHTML(item.category)}</p></div><span class="pill ${escapeHTML(item.status)}">${escapeHTML(status)}</span></div><div class="meta-grid"><div class="meta-item"><strong>Collection center</strong>${escapeHTML(item.centerName)}, ${escapeHTML(item.centerCity)}</div><div class="meta-item"><strong>Pickup window</strong>${escapeHTML(formatDate(item.availableFrom))} – ${escapeHTML(formatDate(item.pickupBy))}</div></div>${centerWarning}${details}${action ? `<div class="card-actions">${action}</div>` : ''}</article>`;
+      return `<article class="data-card">${foodPhotoMarkup(item.imageUrl, item.title)}<div class="card-heading"><div><h3>${escapeHTML(item.title)}</h3><p>${escapeHTML(item.quantity)} ${escapeHTML(item.unit)} · ${escapeHTML(item.category)}</p></div><span class="pill ${escapeHTML(item.status)}">${escapeHTML(status)}</span></div><div class="meta-grid"><div class="meta-item"><strong>Collection center</strong>${escapeHTML(item.centerName)}, ${escapeHTML(item.centerCity)}</div><div class="meta-item"><strong>Pickup window</strong>${escapeHTML(formatDate(item.availableFrom))} – ${escapeHTML(formatDate(item.pickupBy))}</div></div>${centerWarning}${details}${action ? `<div class="card-actions">${action}</div>` : ''}</article>`;
     }).join('');
   }
 
@@ -74,6 +110,9 @@ if (session) {
     if (timeError) { setMessage(listingMessage, timeError); return; }
     const quantity = Number(field('quantity').value);
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100000) { setMessage(listingMessage, 'Please enter a whole quantity between 1 and 100,000.'); return; }
+    const imageInputValue = imageInput.value.trim();
+    const imageUrl = imageInputValue ? safeFoodImageUrl(imageInputValue) : '';
+    if (imageInputValue && !imageUrl) { setMessage(listingMessage, 'Please enter a valid public http:// or https:// image URL of at most 500 characters.'); return; }
     const title = field('title').value.trim();
     const description = field('description').value.trim();
     const allergens = field('allergens').value.trim();
@@ -89,6 +128,7 @@ if (session) {
         restaurantPhone: session.profile.phone,
         title, category: field('category').value, quantity, unit: field('unit').value,
         description, allergens, storageInstructions,
+        ...(imageUrl ? { imageUrl } : {}),
         preparedAt: Timestamp.fromDate(new Date(field('prepared').value)),
         availableFrom: Timestamp.fromDate(new Date(field('start').value)),
         pickupBy: Timestamp.fromDate(new Date(field('deadline').value)),
@@ -97,6 +137,7 @@ if (session) {
         createdAt: serverTimestamp(), updatedAt: serverTimestamp()
       });
       form.reset();
+      clearImagePreview();
       setMessage(listingMessage, 'Your food donation is now available to approved organizations.', 'success');
     } catch (error) { setMessage(listingMessage, errorMessage(error)); }
     finally { posting = false; busy(submit, false); submit.disabled = !centers.length; }

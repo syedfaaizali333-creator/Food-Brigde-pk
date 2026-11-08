@@ -97,24 +97,54 @@ it('unsubscribes correctly even when an auth observer calls back synchronously',
   expect(fake.authSubscriptions.size).toBe(0);
 });
 
+async function createEmailAccount(email) {
+  await wait(() => !document.getElementById('email-create').disabled);
+  fill('register-email', email); fill('register-password', 'password123');
+  document.getElementById('email-create').click();
+  await wait(() => !document.getElementById('register-form').hidden && !document.getElementById('register-submit').disabled);
+}
+
 describe('registration and role-specific workflows with a mocked Firebase SDK', () => {
-  it('creates an individual account once and saves a pending profile without business evidence', async () => {
+  it('creates an authentication account first, then an individual profile', async () => {
     load('register.html', '/register.html?role=individual');
     await import('../src/pages/register.js');
-    await wait(() => !document.getElementById('register-submit').disabled);
-    fill('register-email', 'person@example.com'); fill('register-password', 'password123'); fill('register-name', 'A Person'); fill('register-phone', '03001234567'); fill('register-city', 'Karachi');
+    await wait(() => !document.getElementById('email-create').disabled);
+    expect(document.getElementById('register-form').hidden).toBe(true);
+    submit('register-form');
+    expect(document.getElementById('register-message').textContent).toMatch(/sign in before/i);
+    expect(fake.user).toBeNull();
+    await createEmailAccount('person@example.com');
+    expect(fake.user).toMatchObject({ uid: 'new-user', email: 'person@example.com' });
+    expect(fake.docs.has('profiles/new-user')).toBe(false);
+    expect(document.getElementById('signed-uid').textContent).toBe('new-user');
+    expect(document.getElementById('register-password').value).toBe('');
+    fill('register-name', 'A Person'); fill('register-phone', '03001234567'); fill('register-city', 'Karachi');
     document.getElementById('register-consent').checked = true;
     submit('register-form');
     await wait(() => fake.docs.has('profiles/new-user'));
     expect(fake.docs.get('profiles/new-user')).toMatchObject({ uid: 'new-user', email: 'person@example.com', role: 'individual', status: 'pending', address: '', website: '', evidenceUrls: [] });
   });
+  it('signs an existing email user in before showing the registration form', async () => {
+    load('register.html', '/register.html?role=individual');
+    await import('../src/pages/register.js');
+    await wait(() => !document.getElementById('email-signin').disabled);
+    fill('register-email', 'existing@example.com'); fill('register-password', 'password123');
+    submit('auth-form');
+    await wait(() => !document.getElementById('register-form').hidden);
+    expect(document.getElementById('signed-email').textContent).toBe('existing@example.com');
+    expect(document.getElementById('signed-uid').textContent).toBe('signed-in');
+    expect(fake.docs.size).toBe(0);
+  });
   it('accepts Google sign-in before completing an organization application', async () => {
     load('register.html', '/register.html?role=organization');
     await import('../src/pages/register.js');
-    await wait(() => !document.getElementById('register-submit').disabled);
+    await wait(() => !document.getElementById('google-register').disabled);
+    expect(document.getElementById('register-form').hidden).toBe(true);
     document.getElementById('google-register').click();
     await wait(() => !document.getElementById('signed-account').hidden);
-    await wait(() => !document.getElementById('register-submit').disabled);
+    await wait(() => !document.getElementById('register-form').hidden && !document.getElementById('register-submit').disabled);
+    expect(document.getElementById('signed-uid').textContent).toBe('google-user');
+    expect(fake.docs.has('profiles/google-user')).toBe(false);
     fill('register-name', 'Helping Hands'); fill('register-contact', 'Ali Khan'); fill('register-phone', '03001234567'); fill('register-city', 'Karachi'); fill('register-address', 'Main Road'); fill('register-website', 'https://example.org'); fill('register-description', 'We provide meals.');
     document.getElementById('register-consent').checked = true;
     submit('register-form');
@@ -124,8 +154,8 @@ describe('registration and role-specific workflows with a mocked Firebase SDK', 
   it('saves external photo/video links for restaurant verification without uploading files', async () => {
     load('register.html', '/register.html?role=restaurant');
     await import('../src/pages/register.js');
-    await wait(() => !document.getElementById('register-submit').disabled);
-    fill('register-email', 'restaurant@example.com'); fill('register-password', 'password123'); fill('register-name', 'Good Kitchen'); fill('register-contact', 'Ali'); fill('register-phone', '03001234567'); fill('register-city', 'Karachi'); fill('register-address', 'Main Road'); fill('register-description', 'We prepare food.');
+    await createEmailAccount('restaurant@example.com');
+    fill('register-name', 'Good Kitchen'); fill('register-contact', 'Ali'); fill('register-phone', '03001234567'); fill('register-city', 'Karachi'); fill('register-address', 'Main Road'); fill('register-description', 'We prepare food.');
     fill('register-evidence', 'https://example.com/photo.jpg\nhttps://example.com/video');
     document.getElementById('register-consent').checked = true;
     submit('register-form');
@@ -133,15 +163,57 @@ describe('registration and role-specific workflows with a mocked Firebase SDK', 
     expect(fake.docs.get('profiles/new-user').evidenceUrls).toEqual(['https://example.com/photo.jpg', 'https://example.com/video']);
     expect(fake.docs.get('profiles/new-user')).not.toHaveProperty('evidencePaths');
   });
-  it('rejects unsafe verification URLs before creating an account', async () => {
+  it('rejects unsafe verification URLs without writing a profile', async () => {
     load('register.html', '/register.html?role=restaurant');
     await import('../src/pages/register.js');
-    await wait(() => !document.getElementById('register-submit').disabled);
-    fill('register-email', 'restaurant@example.com'); fill('register-password', 'password123'); fill('register-name', 'Good Kitchen'); fill('register-contact', 'Ali'); fill('register-phone', '03001234567'); fill('register-city', 'Karachi'); fill('register-address', 'Main Road'); fill('register-description', 'We prepare food.');
+    await createEmailAccount('restaurant@example.com');
+    fill('register-name', 'Good Kitchen'); fill('register-contact', 'Ali'); fill('register-phone', '03001234567'); fill('register-city', 'Karachi'); fill('register-address', 'Main Road'); fill('register-description', 'We prepare food.');
     fill('register-evidence', 'javascript:alert(1)'); document.getElementById('register-consent').checked = true;
     submit('register-form');
     expect(document.getElementById('register-message').textContent).toMatch(/valid http/i);
-    expect(fake.user).toBeNull();
+    expect(fake.user.uid).toBe('new-user');
+    expect(fake.docs.has('profiles/new-user')).toBe(false);
+  });
+  it('clears registration details and hides the form when switching accounts', async () => {
+    load('register.html', '/register.html?role=individual');
+    await import('../src/pages/register.js');
+    await createEmailAccount('person@example.com');
+    fill('register-name', 'Personal Name'); fill('register-phone', '03001234567');
+    document.getElementById('switch-account').click();
+    await wait(() => !document.getElementById('auth-panel').hidden);
+    expect(document.getElementById('register-form').hidden).toBe(true);
+    expect(document.getElementById('register-name').value).toBe('');
+    expect(document.getElementById('register-phone').value).toBe('');
+    expect(document.getElementById('signed-uid').textContent).toBe('');
+  });
+  it('shows the authentication UID even if the profile check is denied', async () => {
+    load('register.html', '/register.html?role=individual');
+    await import('../src/pages/register.js');
+    await wait(() => !document.getElementById('google-register').disabled);
+    const { getDoc } = await import('firebase/firestore');
+    getDoc.mockRejectedValueOnce(new Error('Profile permission denied'));
+    document.getElementById('google-register').click();
+    await wait(() => document.getElementById('register-message').textContent.includes('Profile permission denied'));
+    expect(document.getElementById('signed-uid').textContent).toBe('google-user');
+    expect(document.getElementById('register-form').hidden).toBe(true);
+    expect(fake.docs.size).toBe(0);
+  });
+  it('keeps the authenticated user and permits a retry if writing the profile fails', async () => {
+    load('register.html', '/register.html?role=individual');
+    await import('../src/pages/register.js');
+    await createEmailAccount('person@example.com');
+    fill('register-name', 'A Person'); fill('register-phone', '03001234567'); fill('register-city', 'Karachi');
+    document.getElementById('register-consent').checked = true;
+    const { setDoc } = await import('firebase/firestore');
+    setDoc.mockRejectedValueOnce(new Error('Permission denied'));
+    submit('register-form');
+    await wait(() => document.getElementById('register-message').textContent.includes('Permission denied'));
+    expect(fake.user.uid).toBe('new-user');
+    expect(document.getElementById('register-form').hidden).toBe(false);
+    expect(document.getElementById('register-submit').disabled).toBe(false);
+    expect(fake.docs.has('profiles/new-user')).toBe(false);
+    submit('register-form');
+    await wait(() => fake.docs.has('profiles/new-user'));
   });
   it('reopens a rejected organization application without changing its role or account', async () => {
     fake.user = { uid: 'org1', email: 'org1@example.com' };
@@ -201,11 +273,23 @@ describe('registration and role-specific workflows with a mocked Firebase SDK', 
     await wait(() => !document.getElementById('listing-submit').disabled);
     fill('food-title', 'Rice'); fill('food-category', 'Prepared meal'); fill('food-quantity', '12'); fill('food-unit', 'boxes'); fill('food-center', 'center1');
     fill('food-prepared', local(Date.now() - 3600000)); fill('food-start', local(Date.now() + 600000)); fill('food-deadline', local(Date.now() + 7200000)); fill('food-description', 'Rice and vegetables'); fill('food-allergens', 'Unknown'); fill('food-storage', 'Keep chilled'); document.getElementById('food-confirm').checked = true;
+    fill('food-image-url', 'https://example.org/rice.jpg');
+    document.getElementById('food-image-url').dispatchEvent(new Event('change'));
+    const preview = document.getElementById('food-image-preview');
+    expect(preview.src).toBe('https://example.org/rice.jpg');
+    preview.dispatchEvent(new Event('error'));
+    expect(document.getElementById('food-image-warning').hidden).toBe(false);
+    preview.dispatchEvent(new Event('load'));
+    expect(preview.hidden).toBe(false);
+    expect(document.getElementById('food-image-warning').hidden).toBe(true);
     submit('listing-form');
     await wait(() => [...fake.docs.keys()].some((key) => key.startsWith('listings/')));
     const listingKey = [...fake.docs.keys()].find((key) => key.startsWith('listings/'));
     const listingId = listingKey.split('/')[1];
-    expect(fake.docs.get(listingKey)).toMatchObject({ restaurantId: 'restaurant', status: 'available', centerId: 'center1', quantity: 12 });
+    expect(fake.docs.get(listingKey)).toMatchObject({ restaurantId: 'restaurant', status: 'available', centerId: 'center1', quantity: 12, imageUrl: 'https://example.org/rice.jpg' });
+    await wait(() => document.querySelector('#donor-listings img.food-photo'));
+    expect(document.querySelector('#donor-listings img.food-photo').src).toBe('https://example.org/rice.jpg');
+    expect(document.getElementById('food-image-preview').hidden).toBe(true);
     fake.docs.set(listingKey, { ...fake.docs.get(listingKey), status: 'booked', bookingId: 'booking1', bookedBy: 'org1' });
     fake.docs.set('bookings/booking1', { listingId, restaurantId: 'restaurant', organizationName: 'Helping Hands', status: 'booked', pickupAt: fake.stamp(Date.now() + 1800000), contactName: 'Collector', contactPhone: '03001234567', transport: 'Car' });
     fake.notify();
@@ -213,6 +297,51 @@ describe('registration and role-specific workflows with a mocked Firebase SDK', 
     document.querySelector('[data-action=collect]').click();
     await wait(() => fake.docs.get(listingKey).status === 'collected');
     expect(fake.docs.get('bookings/booking1').status).toBe('collected');
+  });
+  it('publishes a listing without an image field when no photo URL is provided', async () => {
+    fake.user = { uid: 'restaurant', email: 'restaurant@example.com' };
+    fake.docs.set('profiles/restaurant', profile('restaurant'));
+    fake.docs.set('centers/center1', center());
+    load('donor-dashboard.html', '/donor-dashboard.html');
+    await import('../src/pages/donor.js');
+    await wait(() => !document.getElementById('listing-submit').disabled);
+    fill('food-title', 'Bread'); fill('food-category', 'Bakery'); fill('food-quantity', '3'); fill('food-unit', 'boxes'); fill('food-center', 'center1');
+    fill('food-prepared', local(Date.now() - 3600000)); fill('food-start', local(Date.now() + 600000)); fill('food-deadline', local(Date.now() + 7200000)); fill('food-description', 'Bread'); fill('food-allergens', 'Wheat'); fill('food-storage', 'Keep dry');
+    document.getElementById('food-confirm').checked = true;
+    submit('listing-form');
+    await wait(() => [...fake.docs.keys()].some((key) => key.startsWith('listings/')));
+    const listingKey = [...fake.docs.keys()].find((key) => key.startsWith('listings/'));
+    expect(fake.docs.get(listingKey)).not.toHaveProperty('imageUrl');
+  });
+  it.each(['javascript:alert(1)', 'http://127.0.0.1/private.jpg', 'https://example.org/' + 'é'.repeat(100)])('rejects unsafe food-photo URL %s before publishing', async (imageUrl) => {
+    fake.user = { uid: 'restaurant', email: 'restaurant@example.com' };
+    fake.docs.set('profiles/restaurant', profile('restaurant'));
+    fake.docs.set('centers/center1', center());
+    load('donor-dashboard.html', '/donor-dashboard.html');
+    await import('../src/pages/donor.js');
+    await wait(() => !document.getElementById('listing-submit').disabled);
+    fill('food-title', 'Rice'); fill('food-category', 'Prepared meal'); fill('food-quantity', '12'); fill('food-unit', 'boxes'); fill('food-center', 'center1');
+    fill('food-prepared', local(Date.now() - 3600000)); fill('food-start', local(Date.now() + 600000)); fill('food-deadline', local(Date.now() + 7200000)); fill('food-description', 'Rice'); fill('food-allergens', 'Unknown'); fill('food-storage', 'Keep chilled');
+    fill('food-image-url', imageUrl); document.getElementById('food-confirm').checked = true;
+    submit('listing-form');
+    expect(document.getElementById('listing-message').textContent).toMatch(/valid public http/i);
+    expect([...fake.docs.keys()].some((key) => key.startsWith('listings/'))).toBe(false);
+  });
+  it('shows safe food photos to organizations and ignores unsafe or missing URLs', async () => {
+    fake.user = { uid: 'org1', email: 'org1@example.com' };
+    fake.docs.set('profiles/org1', profile('organization'));
+    fake.docs.set('centers/center1', center());
+    const listing = { restaurantId: 'restaurant', restaurantName: 'Good Kitchen', restaurantPhone: '03001234567', title: 'Rice', category: 'Prepared meal', quantity: 12, unit: 'boxes', description: 'Rice', allergens: 'Unknown', storageInstructions: 'Keep chilled', preparedAt: fake.stamp(Date.now() - 3600000), availableFrom: fake.stamp(Date.now() - 600000), pickupBy: fake.stamp(Date.now() + 7200000), centerId: 'center1', centerName: 'Center One', centerAddress: 'Confirmed address', centerCity: 'Karachi', status: 'available', bookedBy: '', bookingId: '' };
+    fake.docs.set('listings/photo', { ...listing, imageUrl: 'https://example.org/rice.jpg' });
+    fake.docs.set('listings/old', { ...listing, title: 'Old food' });
+    fake.docs.set('listings/unsafe', { ...listing, title: 'Unsafe food', imageUrl: 'javascript:alert(1)' });
+    load('receiver-dashboard.html', '/receiver-dashboard.html');
+    await import('../src/pages/receiver.js');
+    await wait(() => document.querySelectorAll('#available-list article').length === 3);
+    const images = document.querySelectorAll('#available-list img.food-photo');
+    expect(images).toHaveLength(1);
+    expect(images[0].src).toBe('https://example.org/rice.jpg');
+    expect(images[0].alt).toBe('Photo of Rice');
   });
   it('books and cancels a full pickup for an approved organization', async () => {
     fake.user = { uid: 'org1', email: 'org1@example.com' };
@@ -222,6 +351,7 @@ describe('registration and role-specific workflows with a mocked Firebase SDK', 
     load('receiver-dashboard.html', '/receiver-dashboard.html');
     await import('../src/pages/receiver.js');
     await wait(() => document.querySelector('[data-book="food1"]'));
+    expect(document.querySelector('#available-list .food-photo')).toBeNull(); // older listing without a photo
     document.querySelector('[data-book="food1"]').click();
     expect(document.getElementById('booking-dialog').open).toBe(true);
     fill('pickup-name', 'Collector'); fill('pickup-phone', '03001234567'); fill('pickup-time', local(Date.now() + 1800000)); fill('pickup-transport', 'Volunteer car');
